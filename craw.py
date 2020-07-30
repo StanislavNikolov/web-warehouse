@@ -50,8 +50,8 @@ def fetch(db_url_id, url):
 random_url_generator = get_random_url_generator()
 while True:
 	db_url_id, url = next(random_url_generator)
-	print(f'Sampled {url}')
+	print(f'Sampled {url}', flush = True)
 	try:
 		fetch(db_url_id, url)
 	except Exception as error:
-		print(f'Error {error}')
+		print(f'Error {error}', flush = True)

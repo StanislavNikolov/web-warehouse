@@ -97,8 +97,12 @@ while True:
 	urls = find_urls(page, url)
 	c = time.time()
 
-	# TODO stability: insert can crash, because multiple extractors can get the same page from the database
-	insert(db_page_id, urls)
+	# insert can crash, because multiple extractors can get the same page from the database
+	try:
+		insert(db_page_id, urls)
+	except psycopg2.errors.UniqueViolation as error:
+		print('Non-fatal error:', error)
+
 	d = time.time()
 
 	print(f'Got {db_page_id} -> {len(urls)} urls; GET:{b-a:.2f}s, EXT:{c-b:.2f}s INS:{d-c:.2f}s; {url}', flush = True)
