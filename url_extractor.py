@@ -9,19 +9,42 @@ import urllib.parse
 
 db_conn = psycopg2.connect(dbname = 'web_warehouse', host = 'localhost', user = 'postgres')
 
+'''
 def get_unparsed_page():
 	cur = db_conn.cursor()
+
+	# TODO performance: The offset calculation is slow, because getting precise count is slow
+	# maybe estimate count and retry on errors?
+	# ORDER BY random() is faster??
 	cur.execute("""
 		SELECT pages.id, response_text, url
 		FROM pages
 		JOIN urls ON pages.url_id = urls.id
-		WHERE pages.id NOT IN (SELECT page_id FROM urlextractor_page_url)
+		WHERE NOT EXISTS (SELECT page_id FROM urlextractor_page_url WHERE page_id = pages.id)
+		OFFSET floor( random() * (
+				SELECT COUNT(*)
+				FROM pages
+				WHERE NOT EXISTS (SELECT page_id FROM urlextractor_page_url WHERE page_id = pages.id)
+		))
 		LIMIT 1
 	""")
-	return cur.fetchone()
+'''
 
-def is_absolute(url):
-	return bool()
+def get_unparsed_page_generator():
+	while True:
+		cur = db_conn.cursor()
+
+		cur.execute("""
+			SELECT pages.id, response_text, url
+			FROM pages
+			JOIN urls ON pages.url_id = urls.id
+			WHERE NOT EXISTS (SELECT page_id FROM urlextractor_page_url WHERE page_id = pages.id)
+			ORDER BY random()
+			LIMIT 50
+		""")
+
+		for page_id, resp_text, url in cur:
+			yield (page_id, resp_text, url)
 
 def find_urls(page, page_url):
 	# urls intermingled in html can get escaping artifacts
@@ -51,21 +74,31 @@ def insert(db_page_id, urls):
 
 	args = [cur.mogrify("(%s)", (url,)).decode('utf-8') for url in urls]
 	args_str = ','.join(args)
+
 	cur.execute("INSERT INTO urls (url) VALUES " + args_str + " ON CONFLICT DO NOTHING")
 
+	# There is a MD5 index, utilizing it for 1000x performance
 	cur.execute("""
 		INSERT INTO urlextractor_page_url (page_id, url_id)
-		SELECT %s, id FROM urls WHERE url = ANY(%s)
+		SELECT %s, id FROM urls WHERE MD5(url) IN (
+			SELECT MD5(UNNEST(%s))
+		)
 	""", (db_page_id, urls))
 
 	cur.execute("COMMIT")
 
-
+page_getter = get_unparsed_page_generator()
 while True:
-	db_page_id, page, url = get_unparsed_page()
+	a = time.time()
+
+	db_page_id, page, url = next(page_getter)
+	b = time.time()
+
 	urls = find_urls(page, url)
+	c = time.time()
 
-	print(f'Got {db_page_id} {url} -> {len(urls)} urls')
-
+	# TODO stability: insert can crash, because multiple extractors can get the same page from the database
 	insert(db_page_id, urls)
+	d = time.time()
 
+	print(f'Got {db_page_id} -> {len(urls)} urls; GET:{b-a:.2f}s, EXT:{c-b:.2f}s INS:{d-c:.2f}s; {url}', flush = True)
