@@ -7,7 +7,9 @@ from bs4 import BeautifulSoup
 from urlextract import URLExtract
 import urllib.parse
 
-db_conn = psycopg2.connect(dbname='web_warehouse', host='localhost', user='postgres')
+db_conn = psycopg2.connect(dbname='web_warehouse',
+                           host='localhost',
+                           user='postgres')
 
 '''
 def get_unparsed_page():
@@ -30,6 +32,7 @@ def get_unparsed_page():
     """)
 '''
 
+
 def get_unparsed_page_generator():
     while True:
         cur = db_conn.cursor()
@@ -46,26 +49,38 @@ def get_unparsed_page_generator():
         for page_id, resp_text, url in cur:
             yield (page_id, resp_text, url)
 
+
 def find_urls(page, page_url):
     # urls intermingled in html can get escaping artifacts
     # thats why we put the text through beautifulsoup
+    a = time.time()
     soup = BeautifulSoup(page, 'lxml')
     soup_urls = []
+    b = time.time()
     for a_el in soup.find_all('a'):
         href = a_el.get('href')
 
-        if urllib.parse.urlparse(href).netloc == '': # relative url
+        if urllib.parse.urlparse(href).netloc == '':  # relative url
             final_url = urllib.parse.urljoin(page_url, href)
-        else: # absolute
+        else:  # absolute
             final_url = href
 
         soup_urls.append(final_url)
+    c = time.time()
 
     # for nonhtml pages we need this instead
     text_urls = URLExtract().find_urls(page)
+    d = time.time()
+
+    bs = c-a
+    urlex = d-c
+    print(f'{bs:.4f} {urlex:.4f}', flush=True)
+
+    print(len(set(soup_urls)), len(set(text_urls)), len(set(soup_urls + text_urls)))
 
     # + [page_url] added so that find_urls returns at least 1 url
     return list(set(soup_urls + text_urls + [page_url]))
+
 
 # requeires len(urls) >= 1
 def insert(db_page_id, urls):
@@ -87,6 +102,7 @@ def insert(db_page_id, urls):
 
     cur.execute("COMMIT")
 
+
 page_getter = get_unparsed_page_generator()
 while True:
     a = time.time()
@@ -105,4 +121,4 @@ while True:
 
     d = time.time()
 
-    print(f'Got {db_page_id} -> {len(urls)} urls; GET:{b-a:.2f}s, EXT:{c-b:.2f}s INS:{d-c:.2f}s; {url}', flush = True)
+    print(f'Got {db_page_id} -> {len(urls)} urls; GET:{b-a:.2f}s, EXT:{c-b:.2f}s INS:{d-c:.2f}s; {url}', flush=True)
